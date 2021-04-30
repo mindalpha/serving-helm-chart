@@ -1,0 +1,205 @@
+# Default values for predict.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+consul:
+  dc: "dc-consul"
+  cluster: "dc-consul.cluster.com"
+  keyprefix: "data/example"
+  service: "example.nps.svc.cluster"
+
+aws:
+  enabled: true
+  role: ""
+
+oss: {}
+  # If you are using oss, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'oss:'.
+  #endpoint: ""
+  #id: ""
+  #secret: ""
+
+image:
+  repository: 818539432014.dkr.ecr.us-east-1.amazonaws.com/engineplus/mindalpha-serving-centos
+  pullPolicy: Always #IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+strategy:
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+  type: RollingUpdate
+
+autoscaling:
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    cpu:
+      enabled: true
+      name: cpu
+      type: Resource
+      target:
+        type: Utilization
+        value: 50
+    mem:
+      enabled: false
+      name: memory
+      type: Resource
+      target:
+        type: AverageValue
+        value: 15Gi
+    gpu:
+      enabled: true
+      name: DCGM_FI_DEV_GPU_per_second
+      type: Pods
+      target:
+        type: AverageValue
+        value: 500
+    qps:
+      enabled: true
+      name: nps_server_perfermance_curr_per_second
+      type: Pods
+      target:
+        type: AverageValue
+        value: 60
+    latency:
+      enabled: false
+      name: nps_server_perfermance_avg_latency
+      type: Pods
+      target:
+        type: AverageValue
+        value: 35
+
+livenessProbe:
+  initialDelaySeconds: 180
+
+readinessProbe:
+  initialDelaySeconds: 180
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+podSecurityContext:
+  # fsGroup: 2000
+  fsGroup: 65534
+
+securityContext:
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 1000
+
+service:
+  type: NodePort
+  ports:
+    tcp:
+      port: 10101
+      protocol: TCP
+    http: 
+      port: 10102
+      protocol: TCP
+    metrics: 
+      port: 18080
+      protocol: TCP
+      path: "/metrics"
+
+annotations: |
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "{{ .Values.service.ports.metrics.port }}"
+  prometheus.io/path: "{{ .Values.service.ports.metrics.path }}"
+
+serviceMonitor:
+  release: prometheus-stack
+
+factor:
+  unknown: 400
+  instance:
+    g4dn.4xlarge: 1600
+    m5.4xlarge: 400
+    r5.4xlarge: 400
+    c5.4xlarge: 400
+
+ingress:
+  enabled: false
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths: []
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+  #
+
+gpu:
+  # gpu corporation maybe nvidia or amd
+  enabled: true
+  corporation: nvidia.com
+  count: 1
+
+resources:
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  limits:
+    cpu: 800m
+    memory: 16Gi
+  requests:
+    cpu: 500m
+    memory: 8Gi
+
+nodeSelector: {}
+  # service_type: nps-nodes
+
+tolerations: []
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: service_type
+          operator: In
+          values:
+          - nps-nodes
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 80
+      preference:
+        matchExpressions:
+        - key: nodestype
+          operator: In
+          values:
+          - nps-gpu-nodes
+    - weight: 20
+      preference:
+        matchExpressions:
+        - key: nodestype
+          operator: In
+          values:
+          - nps-cpu-nodes
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+          - predict
+      topologyKey: kubernetes.io/hostname

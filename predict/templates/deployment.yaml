@@ -1,0 +1,204 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "predict.fullname" . }}
+  labels:
+    {{- include "predict.labels" . | nindent 4 }}
+spec:
+  progressDeadlineSeconds: 600
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      {{- include "predict.selectorLabels" . | nindent 6 }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "predict.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{ tpl .Values.annotations . | nindent 8 | trim }}
+    spec:
+      serviceAccountName: {{ include "predict.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- if not .Values.aws.enabled }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  key: aws_access_key_id
+                  name: aws-secret
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: aws_secret_access_key
+                  name: aws-secret
+                  optional: true
+            {{- end }}
+            - name: VERSION
+              value: {{ .Chart.AppVersion }}
+            {{- range $key, $value := .Values.consul }}
+            - name: {{ printf "CONSUL_%s" $key | upper }}
+              value: "{{ $value }}"
+            {{- end }}
+            {{- if .Values.gpu.enabled }}
+            #- name: NVIDIA_VISIBLE_DEVICES
+            #  value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility"
+            {{- end}}
+          ports:
+            {{- range $key, $value := .Values.service.ports }}
+            - name: {{ $key }}
+              containerPort: {{ $value.port }}
+              protocol: {{ $value.protocol }}
+            {{- end }}
+          volumeMounts:
+          - name: service-config
+            mountPath: /etc/predict/service.json
+            subPath: service.json
+          - name: watch-config
+            mountPath: /etc/predict/watch.json
+            subPath: watch.json
+          - name: factor-config
+            mountPath: /etc/predict/factor.json
+            subPath: factor.json
+          {{- if .Values.aws.enabled}}
+          - name: ec2-metadata
+            mountPath: /opt/aws/bin/ec2-metadata
+          {{- end }}
+          {{- if .Values.oss }}
+          - name: oss-config
+            mountPath: /home/predict/.ossutilconfig
+            subPath: .ossutilconfig
+          - name: aws-config-volume
+            mountPath: /home/predict/.aws/config
+            subPath: config
+          {{- end}}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+          {{- if .Values.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+              {{- if .Values.gpu.enabled }}
+              {{ .Values.gpu.corporation }}/gpu: {{ .Values.gpu.count }}
+              {{- end}}
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+          {{- end }}
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                - /bin/bash
+                - -c
+                - |
+                  python3 /usr/local/consul/consul.py config ${CONSUL_DC} > /etc/consul/consul.json
+                  cp -f /etc/predict/service.json /data/recommend/predict_service/etc/predict_service.json
+                  cp -f /etc/predict/watch.json /data/recommend/predict_service/etc/consul_watches.json
+            preStop:
+              exec:
+                command:
+                - /bin/bash
+                - -c
+                - |
+                  /usr/local/consul/consul leave
+      initContainers:
+      - image: busybox
+        command:
+        - sh
+        - -c
+        - |
+          echo 10240 > /proc/sys/net/core/somaxconn
+          echo "core-%e-%p-%t" > /proc/sys/kernel/core_pattern
+          echo 1048576 > /proc/sys/fs/aio-max-nr
+        imagePullPolicy: Always
+        name: sysinit
+        securityContext:
+          privileged: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      volumes:
+      - name: service-config
+        configMap:
+          name: {{ include "predict.fullname" . }}-config
+          items:
+          - key: service.json
+            path: service.json
+      - name: watch-config
+        configMap:
+          name: {{ include "predict.fullname" . }}-config
+          items:
+          - key: watch.json
+            path: watch.json 
+      - name: factor-config
+        configMap:
+          name: {{ include "predict.fullname" . }}-config
+          items:
+          - key: factor.json
+            path: factor.json 
+      {{- if .Values.oss }}
+      - name: oss-config
+        configMap:
+          name: {{ include "predict.fullname" . }}-config
+          items:
+          - key: .ossutilconfig
+            path: .ossutilconfig
+      - name: aws-config-volume
+        configMap:
+          name: {{ include "predict.fullname" . }}-config
+          optional: true
+          items:
+          - key: config
+            path: config
+      {{- end }}
+      {{- if .Values.aws.enabled }}
+      - name: ec2-metadata
+        hostPath:
+          path: /usr/bin/ec2-metadata
+      {{- end }}

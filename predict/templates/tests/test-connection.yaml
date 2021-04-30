@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "predict.fullname" . }}-test-connection"
+  labels:
+    {{- include "predict.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "predict.fullname" . }}:{{ .Values.service.ports.metrics.port }}']
+  restartPolicy: Never

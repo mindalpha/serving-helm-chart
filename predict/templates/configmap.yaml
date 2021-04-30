@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "predict.fullname" . }}-config
+data:
+  service.json: |
+    {
+        "keyprefix": "{{ .Values.consul.keyprefix }}",
+        "service": "{{ .Values.consul.service }}",
+        "path": "/data/mind_model/",
+        "http": {{ .Values.service.ports.http.port }},
+        "tcp": {{ .Values.service.ports.tcp.port }},
+        "monitor_port": {{ .Values.service.ports.metrics.port }},
+        "timeout": 40
+    }
+  watch.json: |
+    {
+        "watches": [
+        {
+            "type": "keyprefix",
+            "prefix": "{{ .Values.consul.keyprefix }}",
+            "args": [
+                "python3", 
+                "/data/recommend/predict_service/script/model_tool.py",
+                "--key={{ .Values.consul.keyprefix }}",
+                "--cluster={{ .Values.consul.service }}"
+            ]
+        },
+        {
+            "type": "key",
+            "key": "consul/nps/factor_map.json",
+            "args": [
+                "python3",
+                "/data/recommend/predict_service/script/consul_tool.py",
+                "register",
+                "--conf=/data/recommend/predict_service/etc/predict_service.json",
+                "--factor_map=consul/nps/factor_map.json"
+            ]
+        }
+      ]
+    }
+  .ossutilconfig: |
+    [Credentials]
+    language=EN
+    {{- if .Values.oss }}
+    endpoint={{ .Values.oss.endpoint }}
+    accessKeyID={{ .Values.oss.id }}
+    accessKeySecret={{ .Values.oss.secret }}
+    {{- end }}
+  factor.json: |
+    {
+      {{- range $key, $value := .Values.factor.instance }}
+      "{{ $key }}": {{ $value }},
+      {{- end }}
+      "unknown": {{ .Values.factor.unknown }}
+    }
+  config: |
+    [default]
+    s3 =
+        addressing_style = virtual
+        max_bandwidth = 50MB/s
+        endpoint_url = http://{{ .Values.oss.endpoint }}
+    [plugins]
+    endpoint = awscli_plugin_endpoint
+

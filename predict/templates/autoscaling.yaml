@@ -1,0 +1,32 @@
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "predict.fullname" . }}-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "predict.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+  {{- range $key, $value := .Values.autoscaling.metrics }} 
+  {{- if $value.enabled }}
+  - type: {{ $value.type }}
+    {{ $value.type | lower }}:
+      {{- if eq $value.type "Pods" }}
+      metric:
+        name: {{ $value.name }}
+      {{- else }}
+      name: {{ $value.name }}
+      {{- end }}
+      target:
+        type: {{ $value.target.type }}
+        {{- if eq $value.target.type "Utilization" }}
+        averageUtilization: {{ $value.target.value }}
+        {{- else }}
+        averageValue: {{ $value.target.value }}
+        {{- end }}
+  {{- end }}
+  {{- end }}

@@ -1,0 +1,55 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: CLUSTER-NAME
+  region: us-east-1
+vpc:
+  id: "vpc-id"
+  cidr: "172.31.0.0/16"
+  subnets:
+    public:
+      us-east-1b:
+          id: "subnet-id"
+          cidr: "172.31.32.0/20"
+      us-east-1a:
+          id: "subnet-id"
+          cidr: "172.31.16.0/20"
+iam:
+  serviceRoleARN: "arn:aws:iam::ACCOUNT-NUMBER:role/ROLE-NAME"
+  - name: mindalpha-gpu-nodes-v2
+    labels: {nodestype: mindalpha-gpu-nodes, service_type: mindalpha-nodes}
+    instanceType: g4dn.4xlarge
+    availabilityZones: ['us-east-1a']
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 1
+    volumeSize: 500
+    volumeType: gp2
+    kubeletExtraConfig:
+      kubeReserved:
+          cpu: "300m"
+          memory: "2000Mi"
+          ephemeral-storage: "1Gi"
+      kubeReservedCgroup: "/kube-reserved"
+      systemReserved:
+          cpu: "300m"
+          memory: "2000Mi"
+          ephemeral-storage: "1Gi"
+      evictionHard:
+          memory.available:  "2000Mi"
+          nodefs.available: "10%"
+      featureGates:
+          DynamicKubeletConfig: true
+          RotateKubeletServerCertificate: true
+    iam:
+      instanceProfileARN: "arn:aws:iam::ACCOUNT-NUMBER:instance-profile/PROFILE-NAME"
+      instanceRoleARN: "arn:aws:iam::ACCOUNT-NUMBER:role/ROLE-NAME"
+    ssh:
+      publicKeyName: 'KEY-NAME'
+    tags:
+      'k8s.io/cluster-autoscaler/CLUSTER-NAME': 'owned'
+      'k8s.io/cluster-autoscaler/enabled': 'true'
+    preBootstrapCommands:
+        - "mkfs.xfs -f /dev/nvme1n1"
+        - "mkdir /data && mount -t xfs -o noatime /dev/nvme1n1 /data"
+        - "chmod -R 0777 /data"
